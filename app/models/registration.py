@@ -22,19 +22,16 @@ class Registration(Base):
 
     team_name = Column(String(100), nullable=True)
 
-    # ✅ MATCH DATABASE COLUMN NAME
-    participation_mode = Column(String(10), nullable=False)
+    # ✅ SINGLE SOURCE OF TRUTH
+    mode = Column(String(10), nullable=False)  # solo | pair | team
 
-    registered_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now()
-    )
+    registered_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint(
             "participant_id",
             "event_id",
-            "participation_mode",
+            "mode",
             name="uq_participant_event_mode"
         ),
     )

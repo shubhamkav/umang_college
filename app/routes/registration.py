@@ -154,13 +154,13 @@ def register_event(
         raise HTTPException(400, "Each member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION ✅ FIXED
+    # 4️⃣ REGISTRATION ✅ STEP 3 FIX
     # ==========================
     registration = Registration(
         participant_id=participant.id,
         event_id=event.id,
         team_name=team_name,
-        participation_mode=mode   # 🔥 FIX HERE
+        mode=mode            # ✅ CORRECT
     )
 
     db.add(registration)
