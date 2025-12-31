@@ -15,7 +15,7 @@ app = FastAPI(title="College Event Portal API")
 app.add_middleware(
     CORSMiddleware,
    allow_origins=[
-    "https://thunderous-pastelito-0a2f09.netlify.app"
+    "https://umang2k25.netlify.app/"
 ],        # OK for college project
     allow_credentials=True,
     allow_methods=["*"],
