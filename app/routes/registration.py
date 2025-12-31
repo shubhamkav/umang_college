@@ -21,7 +21,7 @@ router = APIRouter(prefix="/register", tags=["Registration"])
 # ==========================
 
 cloudinary.config(
-    cloud_name="Root",
+    cloud_name="dljsz4msc",
     api_key="812755949136866",
     api_secret="1ovTVgsgeq4NYcAUOlsPoa2sk28",
     secure=True
