@@ -80,7 +80,7 @@ def register_event(
 ):
 
     # ==========================
-    # 1️⃣ EVENT (CRITICAL CHECK)
+    # 1️⃣ EVENT
     # ==========================
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
@@ -154,13 +154,13 @@ def register_event(
         raise HTTPException(400, "Each member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION (FIXED)
+    # 4️⃣ REGISTRATION ✅ FIXED
     # ==========================
     registration = Registration(
         participant_id=participant.id,
         event_id=event.id,
         team_name=team_name,
-        mode=mode
+        participation_mode=mode   # 🔥 FIX HERE
     )
 
     db.add(registration)
@@ -168,14 +168,12 @@ def register_event(
     try:
         db.commit()
         db.refresh(registration)
-
     except IntegrityError as e:
         db.rollback()
         print("❌ REGISTRATION INSERT ERROR:", e.orig)
-
         raise HTTPException(
             status_code=400,
-            detail="Registration failed. Duplicate entry or invalid event."
+            detail="Registration failed. Duplicate entry or invalid data."
         )
 
     # ==========================
