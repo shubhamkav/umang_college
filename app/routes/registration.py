@@ -37,11 +37,11 @@ MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 # ==========================
 def save_aadhaar(file: UploadFile) -> str:
     if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(400, "Invalid Aadhaar file type")
+        raise HTTPException(status_code=400, detail="Invalid Aadhaar file type")
 
     contents = file.file.read()
     if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(400, "Aadhaar file must be under 2MB")
+        raise HTTPException(status_code=400, detail="Aadhaar file must be under 2MB")
 
     ext = file.filename.split(".")[-1]
     filename = f"{uuid.uuid4()}.{ext}"
@@ -68,7 +68,7 @@ def register_event(
     phone: str = Form(...),
     mode: str = Form(...),  # solo | pair | team
 
-    aadhaar: UploadFile = File(...),  # SOLO PLAYER AADHAAR
+    aadhaar: UploadFile = File(...),
 
     team_name: str = Form(None),
 
@@ -80,14 +80,14 @@ def register_event(
 ):
 
     # ==========================
-    # 1️⃣ EVENT
+    # 1️⃣ EVENT (CRITICAL CHECK)
     # ==========================
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
-        raise HTTPException(404, "Event not found")
+        raise HTTPException(status_code=404, detail="Event not found")
 
     # ==========================
-    # 2️⃣ PARTICIPANT (FIXED)
+    # 2️⃣ PARTICIPANT
     # ==========================
     participant = db.query(Participant).filter(
         (Participant.roll_number == roll_number) |
@@ -95,14 +95,12 @@ def register_event(
     ).first()
 
     if participant:
-        # ❌ Email already used with different roll
         if participant.roll_number != roll_number:
             raise HTTPException(
                 status_code=400,
                 detail="Email already registered with a different roll number"
             )
 
-        # Optional: update Aadhaar if missing
         if not participant.aadhaar_file:
             participant.aadhaar_file = save_aadhaar(aadhaar)
             db.commit()
@@ -125,8 +123,9 @@ def register_event(
         try:
             db.commit()
             db.refresh(participant)
-        except IntegrityError:
+        except IntegrityError as e:
             db.rollback()
+            print("❌ PARTICIPANT INSERT ERROR:", e.orig)
             raise HTTPException(
                 status_code=400,
                 detail="Participant already exists"
@@ -155,7 +154,7 @@ def register_event(
         raise HTTPException(400, "Each member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION
+    # 4️⃣ REGISTRATION (FIXED)
     # ==========================
     registration = Registration(
         participant_id=participant.id,
@@ -165,13 +164,18 @@ def register_event(
     )
 
     db.add(registration)
+
     try:
         db.commit()
         db.refresh(registration)
-    except IntegrityError:
+
+    except IntegrityError as e:
         db.rollback()
+        print("❌ REGISTRATION INSERT ERROR:", e.orig)
+
         raise HTTPException(
-            409, f"You are already registered for this event as {mode}"
+            status_code=400,
+            detail="Registration failed. Duplicate entry or invalid event."
         )
 
     # ==========================
