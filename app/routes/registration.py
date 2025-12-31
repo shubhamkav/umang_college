@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
-import os
 import uuid
+
+import cloudinary
+import cloudinary.uploader
 
 from app.database.db import get_db
 from app.models.participant import Participant
@@ -15,11 +17,19 @@ from app.utils.whatsapp_utils import send_whatsapp_confirmation
 router = APIRouter(prefix="/register", tags=["Registration"])
 
 # ==========================
+# CLOUDINARY CONFIG (FREE, NO .env)
+# ==========================
+
+cloudinary.config(
+    cloud_name="Root",
+    api_key="812755949136866",
+    api_secret="1ovTVgsgeq4NYcAUOlsPoa2sk28",
+    secure=True
+)
+
+# ==========================
 # CONFIG
 # ==========================
-UPLOAD_DIR = "uploads/aadhaar"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 TEAM_SIZE_MAP = {
     "Cricket": 15,
     "Volleyball": 9,
@@ -29,28 +39,25 @@ TEAM_SIZE_MAP = {
 }
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "application/pdf"}
-MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
-
 
 # ==========================
-# HELPERS
+# HELPERS (STEP 2 FIX)
 # ==========================
 def save_aadhaar(file: UploadFile) -> str:
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Invalid Aadhaar file type")
 
-    contents = file.file.read()
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="Aadhaar file must be under 2MB")
+    try:
+        result = cloudinary.uploader.upload(
+            file.file,
+            folder="aadhaar",
+            resource_type="auto"  # supports image + pdf
+        )
+        return result["secure_url"]   # 🔥 STORE URL IN DB
 
-    ext = file.filename.split(".")[-1]
-    filename = f"{uuid.uuid4()}.{ext}"
-    path = os.path.join(UPLOAD_DIR, filename)
-
-    with open(path, "wb") as f:
-        f.write(contents)
-
-    return path
+    except Exception as e:
+        print("❌ CLOUDINARY UPLOAD ERROR:", e)
+        raise HTTPException(status_code=500, detail="Aadhaar upload failed")
 
 
 # ==========================
@@ -106,7 +113,7 @@ def register_event(
             db.commit()
 
     else:
-        aadhaar_path = save_aadhaar(aadhaar)
+        aadhaar_url = save_aadhaar(aadhaar)
 
         participant = Participant(
             name=name.strip(),
@@ -116,7 +123,7 @@ def register_event(
             gender=gender,
             email=email.strip(),
             phone=phone.strip(),
-            aadhaar_file=aadhaar_path
+            aadhaar_file=aadhaar_url
         )
 
         db.add(participant)
@@ -154,13 +161,13 @@ def register_event(
         raise HTTPException(400, "Each member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION ✅ STEP 3 FIX
+    # 4️⃣ REGISTRATION
     # ==========================
     registration = Registration(
         participant_id=participant.id,
         event_id=event.id,
         team_name=team_name,
-        mode=mode            # ✅ CORRECT
+        mode=mode
     )
 
     db.add(registration)
@@ -180,13 +187,13 @@ def register_event(
     # 5️⃣ TEAM / PAIR MEMBERS
     # ==========================
     for i in range(len(member_names)):
-        aadhaar_path = save_aadhaar(member_aadhaars[i])
+        aadhaar_url = save_aadhaar(member_aadhaars[i])
 
         db.add(TeamMember(
             registration_id=registration.id,
             member_name=member_names[i].strip(),
             member_roll=member_rolls[i].strip(),
-            aadhaar_file=aadhaar_path
+            aadhaar_file=aadhaar_url
         ))
 
     db.commit()

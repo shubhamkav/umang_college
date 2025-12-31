@@ -5,10 +5,10 @@ from fastapi import (
     HTTPException,
     Query
 )
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from collections import defaultdict
-import csv, io, os
+import csv, io
 
 from app.database.db import get_db
 from app.models.registration import Registration
@@ -18,11 +18,6 @@ from app.models.team_member import TeamMember
 from app.auth.auth_utils import verify_token
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
-
-# =========================
-# CONFIG
-# =========================
-AADHAAR_DIR = "uploads/aadhaar"
 
 
 # ================= AUTH =================
@@ -34,34 +29,14 @@ def check_admin_auth(authorization: str | None):
         raise HTTPException(status_code=401, detail="Invalid authorization format")
 
     token = authorization.split(" ", 1)[1].strip()
-    if not verify_token(token):
+    payload = verify_token(token)
+
+    if not payload or payload.get("sub") != "admin":
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 # =========================
-# 🔐 SECURE AADHAAR DOWNLOAD (STEP 2)
-# =========================
-@router.get("/aadhaar/{filename}")
-def get_aadhaar_file(
-    filename: str,
-    authorization: str | None = Header(default=None)
-):
-    check_admin_auth(authorization)
-
-    file_path = os.path.join(AADHAAR_DIR, filename)
-
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Aadhaar file not found")
-
-    return FileResponse(
-        file_path,
-        media_type="application/octet-stream",
-        filename=filename
-    )
-
-
-# =========================
-# GET REGISTRATIONS
+# GET REGISTRATIONS (CLOUDINARY)
 # =========================
 @router.get("/registrations")
 def get_all_registrations(
@@ -85,7 +60,7 @@ def get_all_registrations(
             Participant.gender,
             Participant.email,
             Participant.phone,
-            Participant.aadhaar_file,      # ✅ SOLO AADHAAR
+            Participant.aadhaar_file,   # ✅ CLOUDINARY URL
 
             Event.name.label("event"),
             Event.category,
@@ -100,12 +75,12 @@ def get_all_registrations(
 
     rows = query.order_by(Registration.registered_at.desc()).all()
 
-    # -------- TEAM MEMBERS (WITH AADHAAR) --------
+    # -------- TEAM MEMBERS --------
     member_rows = db.query(
         TeamMember.registration_id,
         TeamMember.member_name,
         TeamMember.member_roll,
-        TeamMember.aadhaar_file          # ✅ MEMBER AADHAAR
+        TeamMember.aadhaar_file        # ✅ CLOUDINARY URL
     ).all()
 
     team_map = defaultdict(list)
@@ -128,31 +103,22 @@ def get_all_registrations(
             "email": r.email,
             "phone": r.phone,
 
-            # ✅ SOLO AADHAAR (filename only)
-            "aadhaar_file": os.path.basename(r.aadhaar_file)
-            if r.aadhaar_file else None,
+            # ✅ FULL CLOUDINARY URL
+            "aadhaar_file": r.aadhaar_file,
 
             "event": r.event,
             "category": r.category,
             "team": r.team_name,
             "time": r.registered_at,
 
-            # ✅ TEAM / PAIR MEMBERS
-            "players": [
-                {
-                    "member_name": p["member_name"],
-                    "member_roll": p["member_roll"],
-                    "aadhaar_file": os.path.basename(p["aadhaar_file"])
-                }
-                for p in team_map.get(r.registration_id, [])
-            ]
+            "players": team_map.get(r.registration_id, [])
         })
 
     return response
 
 
 # =========================
-# EXPORT CSV
+# EXPORT CSV (UNCHANGED)
 # =========================
 @router.get("/export")
 def export_registrations(
@@ -193,7 +159,6 @@ def export_registrations(
 
     rows = query.order_by(Registration.registered_at.asc()).all()
 
-    # -------- TEAM MEMBERS --------
     member_rows = db.query(
         TeamMember.registration_id,
         TeamMember.member_name,
@@ -206,7 +171,6 @@ def export_registrations(
             f"{m.member_name} ({m.member_roll})"
         )
 
-    # -------- CSV --------
     output = io.StringIO()
     writer = csv.writer(output)
 
