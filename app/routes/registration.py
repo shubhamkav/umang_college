@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from typing import List
 import os
 import uuid
@@ -39,7 +38,9 @@ def save_aadhaar(file: UploadFile) -> str:
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "Invalid Aadhaar file type")
 
+    file.file.seek(0)
     contents = file.file.read()
+
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(400, "Aadhaar file must be under 2MB")
 
@@ -68,7 +69,7 @@ def register_event(
     phone: str = Form(...),
     mode: str = Form(...),  # solo | pair | team
 
-    aadhaar: UploadFile = File(...),  # SOLO PLAYER AADHAAR
+    aadhaar: UploadFile = File(...),
 
     team_name: str = Form(None),
 
@@ -78,7 +79,6 @@ def register_event(
 
     db: Session = Depends(get_db)
 ):
-
     # ==========================
     # 1️⃣ EVENT
     # ==========================
@@ -87,7 +87,7 @@ def register_event(
         raise HTTPException(404, "Event not found")
 
     # ==========================
-    # 2️⃣ PARTICIPANT (FIXED)
+    # 2️⃣ PARTICIPANT
     # ==========================
     participant = db.query(Participant).filter(
         (Participant.roll_number == roll_number) |
@@ -95,18 +95,15 @@ def register_event(
     ).first()
 
     if participant:
-        # ❌ Email already used with different roll
         if participant.roll_number != roll_number:
             raise HTTPException(
-                status_code=400,
-                detail="Email already registered with a different roll number"
+                400,
+                "Email already registered with a different roll number"
             )
 
-        # Optional: update Aadhaar if missing
         if not participant.aadhaar_file:
             participant.aadhaar_file = save_aadhaar(aadhaar)
             db.commit()
-
     else:
         aadhaar_path = save_aadhaar(aadhaar)
 
@@ -122,18 +119,11 @@ def register_event(
         )
 
         db.add(participant)
-        try:
-            db.commit()
-            db.refresh(participant)
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail="Participant already exists"
-            )
+        db.commit()
+        db.refresh(participant)
 
     # ==========================
-    # 3️⃣ VALIDATION
+    # 3️⃣ MODE VALIDATION
     # ==========================
     if mode == "team":
         if not team_name:
@@ -142,10 +132,11 @@ def register_event(
         required = TEAM_SIZE_MAP.get(event.name)
         if required and len(member_names) != required:
             raise HTTPException(
-                400, f"{event.name} requires exactly {required} players"
+                400,
+                f"{event.name} requires exactly {required} players"
             )
 
-    if mode == "pair" and len(member_names) != 2:
+    if mode == "pair" and len(member_names) != 1:
         raise HTTPException(400, "Pair requires exactly 2 players")
 
     if mode == "solo" and member_names:
@@ -155,7 +146,22 @@ def register_event(
         raise HTTPException(400, "Each member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION
+    # 4️⃣ DUPLICATE CHECK (FIX)
+    # ==========================
+    existing = db.query(Registration).filter(
+        Registration.participant_id == participant.id,
+        Registration.event_id == event.id,
+        Registration.mode == mode
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            409,
+            f"You are already registered for {event.name} as {mode}"
+        )
+
+    # ==========================
+    # 5️⃣ REGISTRATION
     # ==========================
     registration = Registration(
         participant_id=participant.id,
@@ -165,17 +171,11 @@ def register_event(
     )
 
     db.add(registration)
-    try:
-        db.commit()
-        db.refresh(registration)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            409, f"You are already registered for this event as {mode}"
-        )
+    db.commit()
+    db.refresh(registration)
 
     # ==========================
-    # 5️⃣ TEAM / PAIR MEMBERS
+    # 6️⃣ TEAM MEMBERS
     # ==========================
     for i in range(len(member_names)):
         aadhaar_path = save_aadhaar(member_aadhaars[i])
@@ -190,7 +190,7 @@ def register_event(
     db.commit()
 
     # ==========================
-    # 6️⃣ WHATSAPP
+    # 7️⃣ WHATSAPP
     # ==========================
     try:
         send_whatsapp_confirmation(
@@ -204,12 +204,12 @@ def register_event(
         pass
 
     # ==========================
-    # 7️⃣ RESPONSE
+    # 8️⃣ RESPONSE
     # ==========================
     return {
         "message": "Registration successful",
         "event": event.name,
         "mode": mode,
         "team": team_name,
-        "players": len(member_names) if member_names else 1
+        "players": len(member_names) + 1 if mode != "solo" else 1
     }
