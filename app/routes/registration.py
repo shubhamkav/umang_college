@@ -39,8 +39,8 @@ def save_aadhaar(file: UploadFile) -> str:
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "Invalid Aadhaar file type")
 
-    contents = file.file.read()
-    if len(contents) > MAX_FILE_SIZE:
+    data = file.file.read()
+    if len(data) > MAX_FILE_SIZE:
         raise HTTPException(400, "Aadhaar file must be under 2MB")
 
     ext = file.filename.split(".")[-1]
@@ -48,17 +48,18 @@ def save_aadhaar(file: UploadFile) -> str:
     path = os.path.join(UPLOAD_DIR, filename)
 
     with open(path, "wb") as f:
-        f.write(contents)
+        f.write(data)
 
     return path
 
 
 # ==========================
-# REGISTER EVENT
+# REGISTER EVENT (FIXED)
 # ==========================
 @router.post("/")
 def register_event(
     event_id: int = Form(...),
+
     name: str = Form(...),
     roll_number: str = Form(...),
     department: str = Form(...),
@@ -66,9 +67,9 @@ def register_event(
     gender: str = Form(...),
     email: str = Form(...),
     phone: str = Form(...),
-    mode: str = Form(...),  # solo | pair | team
 
-    aadhaar: UploadFile = File(...),  # SOLO PLAYER AADHAAR
+    mode: str = Form(...),  # solo | pair | team
+    aadhaar: UploadFile = File(...),
 
     team_name: str = Form(None),
 
@@ -78,16 +79,15 @@ def register_event(
 
     db: Session = Depends(get_db)
 ):
-
     # ==========================
-    # 1️⃣ EVENT
+    # 1️⃣ EVENT (SAFE)
     # ==========================
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
 
     # ==========================
-    # 2️⃣ PARTICIPANT (FIXED)
+    # 2️⃣ PARTICIPANT (SAFE COMMIT)
     # ==========================
     participant = db.query(Participant).filter(
         (Participant.roll_number == roll_number) |
@@ -95,21 +95,18 @@ def register_event(
     ).first()
 
     if participant:
-        # ❌ Email already used with different roll
         if participant.roll_number != roll_number:
             raise HTTPException(
-                status_code=400,
-                detail="Email already registered with a different roll number"
+                400,
+                "Email already registered with a different roll number"
             )
 
-        # Optional: update Aadhaar if missing
         if not participant.aadhaar_file:
             participant.aadhaar_file = save_aadhaar(aadhaar)
             db.commit()
+            db.refresh(participant)
 
     else:
-        aadhaar_path = save_aadhaar(aadhaar)
-
         participant = Participant(
             name=name.strip(),
             roll_number=roll_number.strip(),
@@ -118,22 +115,15 @@ def register_event(
             gender=gender,
             email=email.strip(),
             phone=phone.strip(),
-            aadhaar_file=aadhaar_path
+            aadhaar_file=save_aadhaar(aadhaar)
         )
 
         db.add(participant)
-        try:
-            db.commit()
-            db.refresh(participant)
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail="Participant already exists"
-            )
+        db.commit()
+        db.refresh(participant)  # ✅ participant.id guaranteed
 
     # ==========================
-    # 3️⃣ VALIDATION
+    # 3️⃣ MODE VALIDATION
     # ==========================
     if mode == "team":
         if not team_name:
@@ -149,17 +139,17 @@ def register_event(
         raise HTTPException(400, "Pair requires exactly 2 players")
 
     if mode == "solo" and member_names:
-        raise HTTPException(400, "Solo registration cannot have team members")
+        raise HTTPException(400, "Solo cannot have team members")
 
     if len(member_names) != len(member_rolls) or len(member_names) != len(member_aadhaars):
-        raise HTTPException(400, "Each member must upload Aadhaar")
+        raise HTTPException(400, "Each team member must upload Aadhaar")
 
     # ==========================
-    # 4️⃣ REGISTRATION
+    # 4️⃣ REGISTRATION (FK SAFE)
     # ==========================
     registration = Registration(
-        participant_id=participant.id,
-        event_id=event.id,
+        participant_id=participant.id,  # ✅ FK OK
+        event_id=event.id,               # ✅ FK OK
         team_name=team_name,
         mode=mode
     )
@@ -171,26 +161,27 @@ def register_event(
     except IntegrityError:
         db.rollback()
         raise HTTPException(
-            409, f"You are already registered for this event as {mode}"
+            409,
+            f"You are already registered for this event as {mode}"
         )
 
     # ==========================
-    # 5️⃣ TEAM / PAIR MEMBERS
+    # 5️⃣ TEAM MEMBERS
     # ==========================
     for i in range(len(member_names)):
-        aadhaar_path = save_aadhaar(member_aadhaars[i])
-
-        db.add(TeamMember(
-            registration_id=registration.id,
-            member_name=member_names[i].strip(),
-            member_roll=member_rolls[i].strip(),
-            aadhaar_file=aadhaar_path
-        ))
+        db.add(
+            TeamMember(
+                registration_id=registration.id,
+                member_name=member_names[i].strip(),
+                member_roll=member_rolls[i].strip(),
+                aadhaar_file=save_aadhaar(member_aadhaars[i])
+            )
+        )
 
     db.commit()
 
     # ==========================
-    # 6️⃣ WHATSAPP
+    # 6️⃣ WHATSAPP (OPTIONAL)
     # ==========================
     try:
         send_whatsapp_confirmation(
@@ -213,3 +204,4 @@ def register_event(
         "team": team_name,
         "players": len(member_names) if member_names else 1
     }
+  
