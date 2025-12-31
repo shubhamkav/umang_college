@@ -39,7 +39,7 @@ def check_admin_auth(authorization: str | None):
 
 
 # =========================
-# 🔐 SECURE AADHAAR DOWNLOAD
+# 🔐 SECURE AADHAAR DOWNLOAD (STEP 2)
 # =========================
 @router.get("/aadhaar/{filename}")
 def get_aadhaar_file(
@@ -47,10 +47,6 @@ def get_aadhaar_file(
     authorization: str | None = Header(default=None)
 ):
     check_admin_auth(authorization)
-
-    # 🔒 Prevent directory traversal
-    if ".." in filename or filename.startswith("/"):
-        raise HTTPException(status_code=400, detail="Invalid filename")
 
     file_path = os.path.join(AADHAAR_DIR, filename)
 
@@ -65,7 +61,7 @@ def get_aadhaar_file(
 
 
 # =========================
-# GET REGISTRATIONS (FIXED)
+# GET REGISTRATIONS
 # =========================
 @router.get("/registrations")
 def get_all_registrations(
@@ -89,7 +85,7 @@ def get_all_registrations(
             Participant.gender,
             Participant.email,
             Participant.phone,
-            Participant.aadhaar_file,
+            Participant.aadhaar_file,      # ✅ SOLO AADHAAR
 
             Event.name.label("event"),
             Event.category,
@@ -99,20 +95,17 @@ def get_all_registrations(
         .join(Event, Event.id == Registration.event_id)
     )
 
-    # ✅ SAFE gender filter
-    if gender and gender.lower() != "all":
-        query = query.filter(
-            Participant.gender.ilike(gender.strip())
-        )
+    if gender != "all":
+        query = query.filter(Participant.gender == gender)
 
     rows = query.order_by(Registration.registered_at.desc()).all()
 
-    # -------- TEAM MEMBERS --------
+    # -------- TEAM MEMBERS (WITH AADHAAR) --------
     member_rows = db.query(
         TeamMember.registration_id,
         TeamMember.member_name,
         TeamMember.member_roll,
-        TeamMember.aadhaar_file
+        TeamMember.aadhaar_file          # ✅ MEMBER AADHAAR
     ).all()
 
     team_map = defaultdict(list)
@@ -135,7 +128,7 @@ def get_all_registrations(
             "email": r.email,
             "phone": r.phone,
 
-            # SOLO AADHAAR (filename only)
+            # ✅ SOLO AADHAAR (filename only)
             "aadhaar_file": os.path.basename(r.aadhaar_file)
             if r.aadhaar_file else None,
 
@@ -144,7 +137,7 @@ def get_all_registrations(
             "team": r.team_name,
             "time": r.registered_at,
 
-            # TEAM / PAIR MEMBERS
+            # ✅ TEAM / PAIR MEMBERS
             "players": [
                 {
                     "member_name": p["member_name"],
@@ -159,7 +152,7 @@ def get_all_registrations(
 
 
 # =========================
-# EXPORT CSV (FIXED)
+# EXPORT CSV
 # =========================
 @router.get("/export")
 def export_registrations(
@@ -191,15 +184,12 @@ def export_registrations(
         .select_from(Registration)
         .join(Participant, Participant.id == Registration.participant_id)
         .join(Event, Event.id == Registration.event_id)
-        # ✅ SAFE filters
-        .filter(Event.category.ilike(category.strip()))
-        .filter(Event.name.ilike(event_name.strip()))
+        .filter(Event.category == category)
+        .filter(Event.name == event_name)
     )
 
-    if gender and gender.lower() != "all":
-        query = query.filter(
-            Participant.gender.ilike(gender.strip())
-        )
+    if gender != "all":
+        query = query.filter(Participant.gender == gender)
 
     rows = query.order_by(Registration.registered_at.asc()).all()
 
