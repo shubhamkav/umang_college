@@ -36,7 +36,7 @@ TEAM_SIZE_MAP = {
     "Kabaddi": 12,
     "Relay 4x100 m": 4,
     "Relay 4x400 m": 4,
-    "Debate": 4
+    "Debate Competition": 4
 }
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "application/pdf"}
