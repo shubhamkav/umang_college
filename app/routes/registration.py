@@ -31,12 +31,15 @@ cloudinary.config(
 # CONFIG
 # ==========================
 TEAM_SIZE_MAP = {
-    "Cricket": 15,
-    "Volleyball": 9,
-    "Kabaddi": 12,
-    "Relay 4x100 m": 4,
-    "Relay 4x400 m": 4,
-    "Debate Competition": 4
+   "Cricket": 15,
+  "Volleyball": 9,
+  "Kabaddi": 12,
+  "Relay 4x100 m": 4,
+  "Relay 4x400 m": 4,
+  "Debate Competition": 4,
+  "Dumb Charade": 2,
+  "Group Discussion": 1,
+  "Quiz Competition": 2
 }
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "application/pdf"}
